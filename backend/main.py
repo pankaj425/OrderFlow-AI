@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import sqlite3, os
+import re
 from groq import Groq
 from dotenv import load_dotenv
 
@@ -170,10 +171,259 @@ def graph():
 class Q(BaseModel):
     question: str
 
+
+import re
+
+def clean_question(q):
+    q = q.lower().strip()
+
+    q = q.replace("salesorder", "sales order")
+    q = q.replace("sales_order", "sales order")
+    q = q.replace("invoice no", "invoice")
+    q = q.replace("billing doc", "billing document")
+
+    return q
+
 @app.post("/query")
 def query(req: Q):
     try:
+
+        user_question = clean_question(req.question)
+
+        # ---------------------------------
+        # SMART FALLBACK HANDLER
+        # ---------------------------------
+
+        order_match = re.search(r'\b7\d+\b', user_question)
+
+        if order_match:
+
+            order_id = order_match.group()
+
+            conn = db()
+
+            # ---------------------------------
+            # SIMPLE ORDER DETAILS
+            # ---------------------------------
+
+            if (
+    user_question == order_id
+    or (
+        "sales order" in user_question
+        and "invoice" not in user_question
+        and "billing" not in user_question
+        and "delivery" not in user_question
+        and "customer" not in user_question
+        and "flow" not in user_question
+        and "trace" not in user_question
+    )
+    or "show order" in user_question
+):
+
+                rows = conn.execute("""
+                SELECT salesorder,
+                       soldtoparty,
+                       totalnetamount,
+                       overalldeliverystatus
+                FROM orders
+                WHERE salesorder = ?
+                """, (order_id,)).fetchall()
+
+                conn.close()
+
+                if rows:
+
+                    data = [dict(r) for r in rows]
+
+                    return {
+                        "answer":
+                        f"Sales order {order_id} found successfully.",
+                        "data": data,
+                        "sql":
+                        f"SELECT * FROM orders WHERE salesorder='{order_id}'",
+                        "highlight_nodes":
+                        [f"orders_{order_id}"]
+                    }
+
+            # ---------------------------------
+            # TRACE FULL FLOW
+            # ---------------------------------
+
+            if "trace" in user_question or "full flow" in user_question:
+
+                rows = conn.execute("""
+                SELECT
+                    o.salesorder,
+                    di.deliverydocument,
+                    ii.billingdocument,
+                    je.accountingdocument
+                FROM orders o
+                LEFT JOIN delivery_items di
+                    ON di.referencesddocument = o.salesorder
+                LEFT JOIN invoice_items ii
+                    ON ii.referencesddocument = di.deliverydocument
+                LEFT JOIN journal_entries je
+                    ON je.referencedocument = ii.billingdocument
+                WHERE o.salesorder = ?
+                """, (order_id,)).fetchall()
+
+                conn.close()
+
+                if rows:
+
+                    data = [dict(r) for r in rows]
+
+                    return {
+                        "answer":
+                        f"Full business flow traced for sales order {order_id}.",
+                        "data": data,
+                        "sql": "Manual trace query",
+                        "highlight_nodes":
+                        [f"orders_{order_id}"]
+                    }
+
+            # ---------------------------------
+            # CUSTOMER QUERY
+            # ---------------------------------
+
+            if "customer" in user_question:
+
+                rows = conn.execute("""
+                SELECT
+                    o.salesorder,
+                    o.soldtoparty,
+                    c.businesspartnername
+                FROM orders o
+                LEFT JOIN customers c
+                    ON o.soldtoparty = c.businesspartner
+                WHERE o.salesorder = ?
+                """, (order_id,)).fetchall()
+
+                conn.close()
+
+                if rows:
+
+                    data = [dict(r) for r in rows]
+
+                    customer_name = data[0].get(
+                        "businesspartnername",
+                        "Unknown"
+                    )
+
+                    return {
+                        "answer":
+                        f"The customer for sales order {order_id} is {customer_name}.",
+                        "data": data,
+                        "sql": "Manual customer query",
+                        "highlight_nodes":
+                        [f"orders_{order_id}"]
+                    }
+
+            # ---------------------------------
+            # DELIVERY QUERY
+            # ---------------------------------
+
+            if "delivery" in user_question:
+
+                rows = conn.execute("""
+                SELECT
+                    di.deliverydocument,
+                    d.overallgoodsmovementstatus
+                FROM delivery_items di
+                LEFT JOIN deliveries d
+                    ON di.deliverydocument = d.deliverydocument
+                WHERE di.referencesddocument = ?
+                """, (order_id,)).fetchall()
+
+                conn.close()
+
+                if rows:
+
+                    data = [dict(r) for r in rows]
+
+                    return {
+                        "answer":
+                        f"Delivery information found for sales order {order_id}.",
+                        "data": data,
+                        "sql": "Manual delivery query",
+                        "highlight_nodes":
+                        [f"orders_{order_id}"]
+                    }
+
+                return {
+                    "answer":
+                    f"No delivery exists yet for sales order {order_id}.",
+                    "data": [],
+                    "sql": ""
+                }
+
+            # ---------------------------------
+            # BILLING / INVOICE QUERY
+            # ---------------------------------
+
+            if (
+                "billing" in user_question
+                or "invoice" in user_question
+            ):
+
+                rows = conn.execute("""
+                SELECT
+                    ii.billingdocument
+                FROM delivery_items di
+                LEFT JOIN invoice_items ii
+                    ON di.deliverydocument = ii.referencesddocument
+                WHERE di.referencesddocument = ?
+                """, (order_id,)).fetchall()
+
+                conn.close()
+
+                if rows:
+
+                    data = [dict(r) for r in rows]
+
+                    return {
+                        "answer":
+                        f"Billing documents found for sales order {order_id}.",
+                        "data": data,
+                        "sql": "Manual billing query",
+                        "highlight_nodes":
+                        [f"orders_{order_id}"]
+                    }
+
+                return {
+                    "answer":
+                    f"No billing document exists yet for sales order {order_id}.",
+                    "data": [],
+                    "sql": ""
+                }
+
+            # ---------------------------------
+            # DELIVERY STATUS
+            # ---------------------------------
+
+            if "delivery status" in user_question:
+
+                rows = conn.execute("""
+                SELECT
+                    deliverydocument,
+                    overallgoodsmovementstatus
+                FROM deliveries
+                LIMIT 10
+                """).fetchall()
+
+                conn.close()
+
+                data = [dict(r) for r in rows]
+
+                return {
+                    "answer":
+                    "Delivery status records fetched successfully.",
+                    "data": data,
+                    "sql": "Manual delivery status query"
+                }
+
         schema = get_schema()
+
         SYSTEM = f"""You are a data analyst for an SAP Order-to-Cash business system.
 ONLY answer questions about this database. NOTHING ELSE.
 
@@ -294,3 +544,45 @@ ANSWER: Based on the data, [explanation]"""
         import traceback
         err_msg = traceback.format_exc()
         return {"answer": f"Server Crash: {err_msg}", "data": [], "sql": ""}
+
+
+# ---------------------------------
+# ANALYTICS API
+# ---------------------------------
+
+@app.get("/analytics")
+def analytics():
+
+    conn = db()
+
+    total_orders = conn.execute("""
+    SELECT COUNT(*) FROM orders
+    """).fetchone()[0]
+
+    total_customers = conn.execute("""
+    SELECT COUNT(*) FROM customers
+    """).fetchone()[0]
+
+    total_invoices = conn.execute("""
+    SELECT COUNT(*) FROM invoices
+    """).fetchone()[0]
+
+    total_payments = conn.execute("""
+    SELECT COUNT(*) FROM payments
+    """).fetchone()[0]
+
+    total_revenue = conn.execute("""
+    SELECT ROUND(SUM(totalnetamount), 2)
+    FROM orders
+    """).fetchone()[0]
+
+    conn.close()
+
+    return {
+        "total_orders": total_orders,
+        "total_customers": total_customers,
+        "total_invoices": total_invoices,
+        "total_payments": total_payments,
+        "total_revenue": total_revenue
+    }
+    

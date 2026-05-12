@@ -5,9 +5,11 @@ import json
 import subprocess
 import time
 
+import sys
+
 print("Starting custom debug server on 8003...")
 server = subprocess.Popen(
-    ["venv\\Scripts\\python.exe", "-m", "uvicorn", "main:app", "--port", "8003"],
+    [sys.executable, "-m", "uvicorn", "main:app", "--port", "8003"],
     stdout=subprocess.PIPE,
     stderr=subprocess.PIPE
 )
