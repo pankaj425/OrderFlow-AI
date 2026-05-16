@@ -2,4 +2,4 @@ fastapi==0.115.12
 uvicorn==0.34.0
 groq==0.19.0
 python-dotenv==1.1.0
-pydantic==2.10.6
+pydantic>=2.7,<2.8
