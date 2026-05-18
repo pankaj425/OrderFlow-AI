@@ -5,7 +5,7 @@ import * as THREE from "three"
 import axios from "axios"
 import "./index.css"
 
-const API = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000"
+const API = import.meta.env.VITE_API_URL || (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1" ? "http://127.0.0.1:8000" : "https://ordertocash-backend.onrender.com")
 
 /* ── Gemini diamond SVG ── */
 const DiamondIcon = ({ size = 14, white = false }) => (
