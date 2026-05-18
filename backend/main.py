@@ -486,7 +486,8 @@ SQL: SELECT ... FROM ...
 ANSWER: Based on the data, [explanation]"""
 
         r = client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model="llama3-8b-8192",
+
             max_tokens=1000,
             messages=[{"role": "system", "content": SYSTEM},
                     {"role": "user", "content": req.question}])
@@ -517,7 +518,8 @@ ANSWER: Based on the data, [explanation]"""
                 prompt2 = f"User Question: {req.question}\nDatabase Result: {data[:5]}\n\nAnswer:"
                 
                 r2 = client.chat.completions.create(
-                    model="llama-3.1-8b-instant",
+                    model="llama3-8b-8192",
+
                     max_tokens=200,
                     messages=[{"role": "system", "content": sys2},
                             {"role": "user", "content": prompt2}])
